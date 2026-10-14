@@ -55,8 +55,12 @@ const kSosChannel = AndroidNotificationChannel(
 /// SOS messages carry data only, so the app rings the alarm itself.
 @pragma('vm:entry-point')
 Future<void> firebaseBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
-  if (message.data['sos'] == '1') await showSosAlarm(message.data);
+  try {
+    if (Firebase.apps.isEmpty) await Firebase.initializeApp();
+    if (message.data['sos'] == '1') await showSosAlarm(message.data);
+  } catch (e) {
+    debugPrint('[FirebaseService] Background push failed: $e');
+  }
 }
 
 /// Shows the full-screen, looping SOS alarm notification.
