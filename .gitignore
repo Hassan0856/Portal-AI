@@ -10,8 +10,10 @@ service-account*.json
 google-services.json
 GoogleService-Info.plist
 
-# Not part of this app's repository
-PortalAI/
+# Not part of this app's repository. The leading / matters: Windows git
+# ignores case, so a bare PortalAI/ also hid android/.../com/portalai/
+# (MainActivity.kt), and the APK closed on launch.
+/PortalAI/
 functions/node_modules/
 
 # Miscellaneous
@@ -38,8 +40,3 @@ build/
 .DS_Store
 Thumbs.db
 
-# secrets
-.env
-env.json
-env.web.json
-PortalAI/
