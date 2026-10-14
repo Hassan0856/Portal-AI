@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "76874187685",
+    "project_id": "portal-ai-f81f7",
+    "storage_bucket": "portal-ai-f81f7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:76874187685:android:24e8aee180e1a174e55e4c",
+        "android_client_info": {
+          "package_name": "com.portalai.portal_ai"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBfi7ZPClRhG8enNN6ePi7FjUoq8qCYrKA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
