@@ -1,0 +1,71 @@
+# Codemagic build for the Portal AI app (Android APK).
+#
+# Before the first build, in Codemagic -> Team settings (or App settings) ->
+# Environment variables, create a group named portal_ai with these Secure
+# variables:
+#   SUPABASE_URL          https://YOUR-PROJECT.supabase.co
+#   SUPABASE_ANON_KEY     the anon key (never the service_role key)
+#   N8N_BASE              https://YOUR-DOMAIN.ngrok-free.app/webhook  (no trailing slash)
+#   APP_KEY               the same string as WF-02's "Key ok?" IF node
+#   GOOGLE_SERVICES_B64   android/app/google-services.json as one base64 line
+# The camera's DEVICE_KEY never goes in the app.
+workflows:
+  portal-ai-apk:
+    name: Portal AI APK
+    max_build_duration: 40
+    instance_type: mac_mini_m2
+    environment:
+      flutter: stable
+      groups:
+        - portal_ai
+      # Uncomment after uploading a keystore (Team settings -> Code signing
+      # identities -> Android keystores, reference name portal_ai_keystore),
+      # so every APK installs over the previous one:
+      # android_signing:
+      #   - portal_ai_keystore
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+    scripts:
+      - name: Write env.json and google-services.json
+        script: |
+          #!/usr/bin/env bash
+          set -e
+          cd "$CM_BUILD_DIR"
+          for v in SUPABASE_URL SUPABASE_ANON_KEY N8N_BASE APP_KEY; do
+            if [ -z "${!v}" ]; then echo "Missing Codemagic variable $v (group portal_ai)"; exit 1; fi
+          done
+          python3 - <<'PY'
+          import json, os
+          keys = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "N8N_BASE", "APP_KEY"]
+          vals = {k: os.environ[k].strip() for k in keys}
+          vals["N8N_BASE"] = vals["N8N_BASE"].rstrip("/")
+          with open("env.json", "w") as f:
+              json.dump(vals, f)
+          PY
+          echo "env.json written (values hidden)"
+          if [ -n "$GOOGLE_SERVICES_B64" ]; then
+            echo "$GOOGLE_SERVICES_B64" | base64 --decode > android/app/google-services.json
+          fi
+          if [ ! -f android/app/google-services.json ]; then
+            echo "android/app/google-services.json is missing: set GOOGLE_SERVICES_B64"; exit 1
+          fi
+          if grep -q '"100000000000"' android/app/google-services.json; then
+            echo "google-services.json is the placeholder, not your Firebase file"; exit 1
+          fi
+          grep -q '"com.portalai.portal_ai"' android/app/google-services.json || {
+            echo "google-services.json has no Android app com.portalai.portal_ai"; exit 1; }
+      - name: Get packages
+        script: flutter pub get
+      - name: Run tests
+        script: flutter test
+      - name: Build APK
+        script: |
+          flutter build apk --release \
+            --dart-define-from-file=env.json \
+            --build-number=$BUILD_NUMBER
+    artifacts:
+      - build/app/outputs/flutter-apk/*.apk

@@ -1,0 +1,125 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:portalai/core/app_config.dart';
+import 'package:portalai/models/models.dart';
+import 'package:portalai/providers/providers.dart';
+import 'package:portalai/services/firebase_service.dart';
+import 'package:portalai/services/n8n_api.dart';
+import 'package:portalai/services/supabase_service.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  group('AppConfig Tests', () {
+    test('AppConfig handles uninitialized/placeholder state correctly', () {
+      // No --dart-define-from-file in tests: nothing is configured
+      expect(AppConfig.isSupabaseConfigured, isFalse);
+      expect(AppConfig.isN8nConfigured, isFalse);
+    });
+  });
+
+  group('SupabaseService Offline & Fallback Tests', () {
+    test('SupabaseService handles unconfigured state without throwing',
+        () async {
+      final service = SupabaseService.instance;
+      expect(service.isAvailable, isFalse);
+
+      // In unconfigured/demo mode, signIn completes gracefully
+      final err = await service.signIn(
+        role: UserRole.resident,
+        identifier: 'test_resident',
+        email: 'resident@example.com',
+        password: 'password123',
+      );
+      expect(err, isNull);
+      expect(service.cachedRole, UserRole.resident);
+      await service.signOut();
+      expect(service.cachedRole, isNull);
+
+      // Falls back to mock events and messages
+      final events = await service.fetchEvents();
+      expect(events, isNotEmpty);
+      expect(events.first.score, inInclusiveRange(1, 10));
+
+      final messages = await service.fetchMessages();
+      expect(messages, isNotEmpty);
+
+      // Stats calculation
+      final stats = service.calculateStats(events);
+      expect(stats.length, equals(3));
+      expect(stats[0].label, equals('Total Events'));
+    });
+  });
+
+  group('FirebaseService Safety Tests', () {
+    test('Push is off without Firebase and topic calls are harmless', () async {
+      final fb = FirebaseService.instance;
+      expect(fb.isAvailable, isFalse);
+      await fb.applyRoleTopics(UserRole.guardian);
+      await fb.applyRoleTopics(null);
+    });
+  });
+
+  group('n8n API Tests', () {
+    test('App actions fail clearly when N8N_BASE / APP_KEY are missing',
+        () async {
+      final res = await N8nApi.appAction('confirm', {'event_id': '1'});
+      expect(res.ok, isFalse);
+      expect(res.message, contains('N8N_BASE'));
+    });
+  });
+
+  group('v4 row mapping Tests', () {
+    test('events and messages rows map to the app models', () {
+      final e = SupabaseService.mapEvent({
+        'id': 42,
+        'device_id': 'front_door',
+        'event_type': 'motion',
+        'occurred_at': '2026-10-14T10:00:00+05:30',
+        'description': 'A person in a red shirt at the door',
+        'has_visitor': true,
+        'rule_flags': 'loitering,unusual_hour',
+        'anomaly_score': 6,
+        'snapshot_kind': 'flagged',
+        'snapshot_url': 'https://example.com/a.jpg',
+        'owner_response': 'pending',
+      }, {'front_door': 'Main door'});
+      expect(e.id, '42');
+      expect(e.type, 'Visitor');
+      expect(e.location, 'Main door');
+      expect(e.isPending, isTrue);
+      expect(e.tags, containsAll(['Visitor', 'loitering', 'unusual hour']));
+
+      final m = SupabaseService.mapMessage({
+        'id': 7,
+        'category': 'alert',
+        'title': 'Door alert',
+        'body': 'Someone at 2 am',
+        'event_id': 42,
+        'created_at': '2026-10-14T10:00:05+05:30',
+      }, {'42': e});
+      expect(m.kind, MessageKind.highRisk);
+      expect(m.eventId, '42');
+      expect(m.score, 6);
+    });
+  });
+
+  group('Riverpod Providers Tests', () {
+    test('Providers supply initial data without errors', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+
+      final auth = container.read(authProvider);
+      expect(auth, isNull);
+
+      final events = container.read(eventsProvider);
+      expect(events, isNotEmpty);
+
+      final messages = container.read(messagesProvider);
+      expect(messages, isNotEmpty);
+
+      final stats = container.read(statsProvider);
+      expect(stats.length, equals(3));
+    });
+  });
+}

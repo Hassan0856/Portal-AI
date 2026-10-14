@@ -1,0 +1,45 @@
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+env.json
+env.web.json
+*.key
+*.pem
+service-account*.json
+google-services.json
+GoogleService-Info.plist
+
+# Not part of this app's repository
+PortalAI/
+functions/node_modules/
+
+# Miscellaneous
+*.log
+*.tmp
+
+# Flutter/Dart build and tool directories
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+.pub-cache/
+.pub/
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+*.swp
+*~
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# secrets
+.env
+env.json
+env.web.json
+PortalAI/
