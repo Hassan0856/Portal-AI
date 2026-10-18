@@ -130,98 +130,192 @@ class _RoleButton extends StatelessWidget {
   }
 }
 
+/// Log in or sign up for the chosen role. Log in is email + password; the
+/// name is asked once, at sign up.
 class LoginScreen extends ConsumerStatefulWidget {
-  const LoginScreen({super.key, required this.role});
+  const LoginScreen({super.key, required this.role, this.signUp = false});
   final UserRole role;
+
+  /// Open on the Sign up tab.
+  final bool signUp;
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _form = GlobalKey<FormState>();
-  final _id = TextEditingController();
+  final _name = TextEditingController();
   final _email = TextEditingController();
   final _pw = TextEditingController();
+  final _pw2 = TextEditingController();
+  late bool _signUp = widget.signUp;
   bool _busy = false;
+
+  /// Email waiting for its confirmation link (shows the check-email panel).
+  String? _pendingEmail;
+
+  /// Message shown inside the card: an error, or info when [_infoOk].
+  String? _notice;
+  bool _infoOk = false;
+
+  /// The last login failed because the email isn't confirmed.
+  bool _unconfirmed = false;
 
   bool get _guardian => widget.role == UserRole.guardian;
 
   @override
   void dispose() {
-    _id.dispose();
+    _name.dispose();
     _email.dispose();
     _pw.dispose();
+    _pw2.dispose();
     super.dispose();
   }
 
-  Future<void> _submit() async {
+  void _setMode(bool signUp) {
+    if (_busy || signUp == _signUp) return;
+    setState(() {
+      _signUp = signUp;
+      _notice = null;
+      _unconfirmed = false;
+    });
+  }
+
+  Future<void> _logIn() async {
     if (!_form.currentState!.validate()) return;
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _notice = null;
+      _unconfirmed = false;
+    });
     final err = await ref
         .read(authProvider.notifier)
-        .signIn(widget.role, _id.text.trim(), _email.text.trim(), _pw.text);
+        .signIn(widget.role, _email.text.trim(), _pw.text);
     if (!mounted) return;
-    setState(() => _busy = false);
-    if (err != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(err), backgroundColor: const Color(0xFFB04060)),
-      );
-    }
+    setState(() {
+      _busy = false;
+      _notice = err;
+      _infoOk = false;
+      _unconfirmed = err == SupabaseService.emailNotConfirmedMessage;
+    });
     // On success the router redirect sends the user to /dashboard.
   }
 
-  Future<void> _signUp() async {
+  Future<void> _createAccount() async {
     if (!_form.currentState!.validate()) return;
-    setState(() => _busy = true);
-    final msg = await ref
-        .read(authProvider.notifier)
-        .signUp(widget.role, _id.text.trim(), _email.text.trim(), _pw.text);
+    setState(() {
+      _busy = true;
+      _notice = null;
+    });
+    final res = await ref.read(authProvider.notifier).signUp(
+        widget.role, _name.text.trim(), _email.text.trim(), _pw.text);
     if (!mounted) return;
-    setState(() => _busy = false);
-    if (msg != null) {
-      // Could be an info message (confirm email) or an error
-      final isInfo = msg.toLowerCase().contains('confirm') ||
-          msg.toLowerCase().contains('check your inbox');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(msg),
-          backgroundColor: isInfo ? const Color(0xFF3A8C6E) : const Color(0xFFB04060),
-          duration: const Duration(seconds: 6),
-        ),
-      );
-    }
-    // On immediate success (email confirm disabled) router redirects to /dashboard.
+    setState(() {
+      _busy = false;
+      switch (res.outcome) {
+        case SignUpOutcome.checkEmail:
+          _pendingEmail = _email.text.trim();
+        case SignUpOutcome.error:
+          _notice = res.message;
+          _infoOk = false;
+        case SignUpOutcome.signedIn:
+          break; // the router redirect takes over
+      }
+    });
   }
+
+  Future<void> _resend(String email) async {
+    setState(() {
+      _busy = true;
+      _notice = null;
+    });
+    final err =
+        await ref.read(authProvider.notifier).resendConfirmation(email);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _infoOk = err == null;
+      _notice = err ?? 'Email sent again to $email.';
+    });
+  }
+
+  Widget _noticeBox() => _notice == null
+      ? const SizedBox.shrink()
+      : Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: GlassCard(
+            radius: 20,
+            fill: (_infoOk ? const Color(0xFF3A8C6E) : const Color(0xFFB04060))
+                .withValues(alpha: .12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(children: [
+              Icon(
+                  _infoOk
+                      ? Icons.check_circle_outline_rounded
+                      : Icons.error_outline_rounded,
+                  size: 20,
+                  color: _infoOk
+                      ? const Color(0xFF3A8C6E)
+                      : const Color(0xFFB04060)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(_notice!,
+                    style: const TextStyle(fontSize: 13.5, height: 1.35)),
+              ),
+            ]),
+          ),
+        );
+
+  Widget _back() => TextButton(
+        onPressed: () =>
+            context.canPop() ? context.pop() : context.go('/welcome'),
+        child: const Text('Back'),
+      );
 
   @override
   Widget build(BuildContext context) {
+    final pending = _pendingEmail;
+    if (pending != null) return _checkEmail(pending);
+
+    final emailOk = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
     return _AuthPanel(children: [
       const _Title(),
+      Text(_guardian ? 'Guardian' : 'Resident',
+          style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1,
+              fontSize: 15,
+              color: AppColors.secondary)),
+      const SizedBox(height: 14),
+      GlassFilterTabs(
+        labels: const ['Log in', 'Sign up'],
+        selected: _signUp ? 1 : 0,
+        onChanged: (i) => _setMode(i == 1),
+      ),
+      const SizedBox(height: 20),
       Form(
         key: _form,
         child: Column(children: [
-          GlassTextField(
-            controller: _id,
-            hint: _guardian ? 'Guardian ID...' : 'Resident email or ID...',
-            icon: _guardian ? Icons.shield_outlined : Icons.groups_outlined,
-            textInputAction: TextInputAction.next,
-            validator: (v) => (v == null || v.trim().isEmpty)
-                ? (_guardian
-                    ? 'Enter your guardian ID'
-                    : 'Enter your email or ID')
-                : null,
-          ),
-          const SizedBox(height: 14),
+          if (_signUp) ...[
+            GlassTextField(
+              controller: _name,
+              hint: 'Your name',
+              icon: _guardian ? Icons.shield_outlined : Icons.person_outline,
+              textInputAction: TextInputAction.next,
+              validator: (v) =>
+                  (v ?? '').trim().isEmpty ? 'Enter your name' : null,
+            ),
+            const SizedBox(height: 14),
+          ],
           GlassTextField(
             controller: _email,
             hint: 'your@email.com',
             icon: Icons.mail_outline_rounded,
             keyboardType: TextInputType.emailAddress,
             textInputAction: TextInputAction.next,
-            validator: (v) =>
-                RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch((v ?? '').trim())
-                    ? null
-                    : 'Enter a valid email address',
+            validator: (v) => emailOk.hasMatch((v ?? '').trim())
+                ? null
+                : 'Enter a valid email address',
           ),
           const SizedBox(height: 14),
           GlassTextField(
@@ -229,35 +323,89 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             hint: 'Password',
             icon: Icons.lock_outline_rounded,
             obscure: true,
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) => _submit(),
+            textInputAction:
+                _signUp ? TextInputAction.next : TextInputAction.done,
+            onSubmitted: _signUp ? null : (_) => _logIn(),
             validator: (v) => (v ?? '').length < 6
                 ? 'Password must be at least 6 characters'
                 : null,
           ),
-          const SizedBox(height: 22),
-          GlassButton(label: 'LOGIN', onPressed: _submit, loading: _busy),
-          const SizedBox(height: 8),
-          TextButton(
-            onPressed: _busy ? null : _signUp,
-            child: const Text(
-              'No account? Sign Up',
-              style: TextStyle(fontSize: 13),
+          if (_signUp) ...[
+            const SizedBox(height: 14),
+            GlassTextField(
+              controller: _pw2,
+              hint: 'Confirm password',
+              icon: Icons.lock_outline_rounded,
+              obscure: true,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _createAccount(),
+              validator: (v) =>
+                  v != _pw.text ? 'Passwords do not match' : null,
             ),
+          ],
+          const SizedBox(height: 22),
+          _noticeBox(),
+          if (_unconfirmed && !_signUp) ...[
+            TextButton(
+              onPressed: _busy ? null : () => _resend(_email.text.trim()),
+              child: const Text('Resend confirmation email'),
+            ),
+            const SizedBox(height: 6),
+          ],
+          GlassButton(
+            label: _signUp ? 'SIGN UP' : 'LOG IN',
+            onPressed: _signUp ? _createAccount : _logIn,
+            loading: _busy,
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 10),
           Text(
             SupabaseService.instance.isAvailable
                 ? 'Supabase Authentication active'
                 : 'Demo sign-in · Supabase is not in this build (env.json)',
+            textAlign: TextAlign.center,
             style: const TextStyle(color: AppColors.muted, fontSize: 13),
           ),
-          TextButton(
-            onPressed: () =>
-                context.canPop() ? context.pop() : context.go('/welcome'),
-            child: const Text('Back'),
-          ),
+          _back(),
         ]),
+      ),
+    ]);
+  }
+
+  /// After sign up with "Confirm email" on.
+  Widget _checkEmail(String email) {
+    return _AuthPanel(children: [
+      const _Title(),
+      const Icon(Icons.mark_email_unread_outlined,
+          size: 44, color: AppColors.primary),
+      const SizedBox(height: 14),
+      const Text('Check your email',
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+      const SizedBox(height: 10),
+      Text(
+        'We sent a link to $email. Open it on this phone and tap the link '
+        'to finish. PortalAI opens and signs you in.',
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+            color: AppColors.secondary, fontSize: 14.5, height: 1.4),
+      ),
+      const SizedBox(height: 22),
+      _noticeBox(),
+      GlassButton(
+        label: 'RESEND EMAIL',
+        icon: Icons.refresh_rounded,
+        loading: _busy,
+        onPressed: () => _resend(email),
+      ),
+      const SizedBox(height: 8),
+      TextButton(
+        onPressed: _busy
+            ? null
+            : () => setState(() {
+                  _pendingEmail = null;
+                  _signUp = false;
+                  _notice = null;
+                }),
+        child: const Text('Back to Log in'),
       ),
     ]);
   }

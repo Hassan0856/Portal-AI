@@ -27,7 +27,6 @@ void main() {
       // In unconfigured/demo mode, signIn completes gracefully
       final err = await service.signIn(
         role: UserRole.resident,
-        identifier: 'test_resident',
         email: 'resident@example.com',
         password: 'password123',
       );

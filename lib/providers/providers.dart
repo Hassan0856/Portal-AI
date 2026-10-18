@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show AuthChangeEvent, AuthState;
 import '../data/mock_data.dart';
 import '../models/models.dart';
 import '../services/firebase_service.dart';
@@ -11,26 +13,55 @@ final authProvider =
     NotifierProvider<AuthNotifier, UserRole?>(AuthNotifier.new);
 
 class AuthNotifier extends Notifier<UserRole?> {
+  StreamSubscription<AuthState>? _authSub;
+
   /// main() restores a saved session (and its role from profiles) before
   /// the app starts, so a guardian stays a guardian after a restart.
   @override
-  UserRole? build() => SupabaseService.instance.cachedRole;
+  UserRole? build() {
+    // Opened from the confirmation email: supabase_flutter exchanges the
+    // link for a session and reports signedIn; read the role and go in.
+    _authSub = SupabaseService.instance.authChanges?.listen(_onAuthChange);
+    ref.onDispose(() => _authSub?.cancel());
+    return SupabaseService.instance.cachedRole;
+  }
 
-  /// Signs in through Supabase Auth and checks profiles.role (9.2).
-  Future<String?> signIn(
-      UserRole role, String id, String email, String password) async {
-    final err = await SupabaseService.instance.signIn(
-      role: role,
-      identifier: id,
-      email: email,
-      password: password,
-    );
-    if (err == null) {
-      state = role;
-      final s = ref.read(settingsProvider);
-      unawaited(FirebaseService.instance.applyRoleTopics(role,
-          status: s.systemUpdates, digest: s.activityAlerts));
+  Future<void> _onAuthChange(AuthState s) async {
+    final service = SupabaseService.instance;
+    if (s.event == AuthChangeEvent.signedOut) {
+      if (state != null) state = null;
+      return;
     }
+    if (s.event != AuthChangeEvent.signedIn ||
+        s.session == null ||
+        state != null ||
+        service.signingIn) {
+      return;
+    }
+    final res = await service.completeLinkSignIn();
+    if (res.role != null) {
+      _signedIn(res.role!);
+    } else if (res.error != null) {
+      FirebaseService.messengerKey.currentState?.showSnackBar(SnackBar(
+        content: Text(res.error!),
+        backgroundColor: const Color(0xFFB04060),
+        duration: const Duration(seconds: 8),
+      ));
+    }
+  }
+
+  void _signedIn(UserRole role) {
+    state = role;
+    final s = ref.read(settingsProvider);
+    unawaited(FirebaseService.instance.applyRoleTopics(role,
+        status: s.systemUpdates, digest: s.activityAlerts));
+  }
+
+  /// Signs in with email + password and checks profiles.role (9.2).
+  Future<String?> signIn(UserRole role, String email, String password) async {
+    final err = await SupabaseService.instance
+        .signIn(role: role, email: email, password: password);
+    if (err == null) _signedIn(role);
     return err;
   }
 
@@ -41,17 +72,22 @@ class AuthNotifier extends Notifier<UserRole?> {
     await SupabaseService.instance.signOut();
   }
 
-  /// Creates a Supabase Auth user. Returns an info or error message; the
-  /// role row is added by hand in Supabase, so this never signs in.
-  Future<String?> signUp(
-      UserRole role, String id, String email, String password) {
-    return SupabaseService.instance.signUp(
+  /// Creates a Supabase Auth user with the name in its metadata. Signs in
+  /// straight away when Supabase returns a session (Confirm email off).
+  Future<({SignUpOutcome outcome, String? message})> signUp(
+      UserRole role, String name, String email, String password) async {
+    final res = await SupabaseService.instance.signUp(
       role: role,
-      identifier: id,
+      displayName: name,
       email: email,
       password: password,
     );
+    if (res.outcome == SignUpOutcome.signedIn) _signedIn(role);
+    return res;
   }
+
+  Future<String?> resendConfirmation(String email) =>
+      SupabaseService.instance.resendConfirmation(email);
 }
 
 /// Settings -> Notifications. Each switch is an optional FCM topic,

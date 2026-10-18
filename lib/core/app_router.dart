@@ -24,9 +24,18 @@ final routerProvider = Provider<GoRouter>((ref) {
   final router = GoRouter(
     initialLocation: '/welcome',
     refreshListenable: refresh,
+    // A link the router doesn't know (e.g. the email-confirmation deep link
+    // if it ever reaches go_router) goes back to the start instead of an
+    // error page; the auth listener then routes a signed-in user inside.
+    onException: (_, __, router) => router.go('/welcome'),
     redirect: (context, state) {
       final role = ref.read(authProvider);
       final loc = state.matchedLocation;
+      if (state.uri.path.isEmpty ||
+          state.uri.path == '/' ||
+          state.uri.path.contains('login-callback')) {
+        return role == null ? '/welcome' : '/dashboard';
+      }
       final isPublic = loc == '/welcome' || loc.startsWith('/login');
       if (role == null && !isPublic) return '/welcome';
       if (role != null && isPublic) return '/dashboard';

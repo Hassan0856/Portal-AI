@@ -9,6 +9,9 @@ import '../data/mock_data.dart';
 import '../models/models.dart';
 import 'n8n_api.dart';
 
+/// Result of [SupabaseService.signUp].
+enum SignUpOutcome { signedIn, checkEmail, error }
+
 /// Reads the v4 Supabase backend (Build Guide 3.1 to 3.5) with the signed-in
 /// user's session. The app only reads: every change goes through n8n WF-02
 /// (see [N8nApi]). Tables: events, messages, devices, site_config, baseline,
@@ -41,6 +44,12 @@ class SupabaseService {
         // ignore: deprecated_member_use
         anonKey: AppConfig.supabaseAnonKey,
         debug: kDebugMode,
+        // PKCE (the default) with detectSessionInUri on: supabase_flutter
+        // catches the email link (app_links) and signs the user in.
+        authOptions: const FlutterAuthClientOptions(
+          authFlowType: AuthFlowType.pkce,
+          detectSessionInUri: true,
+        ),
       );
       _initialized = true;
     } catch (e) {
@@ -51,7 +60,31 @@ class SupabaseService {
 
   // ───────────────────────── Authentication (9.2) ─────────────────────────
 
+  /// Deep link the confirmation email opens on the phone. It must also be in
+  /// Supabase -> Authentication -> URL Configuration -> Redirect URLs, and it
+  /// matches the intent-filter in AndroidManifest.xml.
+  static const String mobileAuthRedirect =
+      'com.portalai.portal_ai://login-callback';
+
+  /// Where email links send the user: the app on a phone, this page on web.
+  static String? get emailRedirectTo =>
+      kIsWeb ? Uri.base.origin : mobileAuthRedirect;
+
+  /// Shown when Supabase refuses a login because the email isn't confirmed;
+  /// the login screen offers "Resend email" next to it.
+  static const String emailNotConfirmedMessage =
+      'Email not confirmed. Open the email from PortalAI on this phone and '
+      'tap the link, or resend it.';
+
   User? get currentUser => isAvailable ? client.auth.currentUser : null;
+
+  /// Auth changes from Supabase, e.g. signedIn after the email link.
+  Stream<AuthState>? get authChanges =>
+      isAvailable ? client.auth.onAuthStateChange : null;
+
+  /// True while signIn / signUp run, so the email-link handler doesn't also
+  /// act on the signedIn event they cause.
+  bool signingIn = false;
 
   /// Reads the role of a session saved on the phone, so a guardian who
   /// reopens the app is still a guardian. Signs out if the role is gone.
@@ -59,22 +92,33 @@ class SupabaseService {
     final user = currentUser;
     if (user == null) return;
     try {
-      final profile = await client
-          .from('profiles')
-          .select('role, display_name')
-          .eq('user_id', user.id)
-          .maybeSingle();
-      final role = _roleFrom(profile?['role']);
+      final role = await _loadProfile(user);
       if (role == null) {
         await signOut();
         return;
       }
-      cachedRole = role;
-      displayName = profile?['display_name'] as String?;
     } catch (e) {
       // Offline at start-up: keep the session, assume nothing about the role.
       debugPrint('[SupabaseService] restoreSession: $e');
     }
+  }
+
+  /// Reads profiles.role / display_name for [user] into the cache. The name
+  /// falls back to the one given at sign up (user metadata).
+  Future<UserRole?> _loadProfile(User user) async {
+    final profile = await client
+        .from('profiles')
+        .select('role, display_name')
+        .eq('user_id', user.id)
+        .maybeSingle();
+    final role = _roleFrom(profile?['role']);
+    if (role == null) return null;
+    cachedRole = role;
+    final name = (profile?['display_name'] as String?)?.trim();
+    displayName = name?.isNotEmpty == true
+        ? name
+        : user.userMetadata?['display_name'] as String?;
+    return role;
   }
 
   UserRole? _roleFrom(Object? v) => switch (v) {
@@ -83,11 +127,38 @@ class SupabaseService {
         _ => null,
       };
 
-  /// Signs in and checks profiles.role against the button the user chose.
-  /// Returns null on success or a message to show.
+  static String _noRoleMessage(UserRole? role) =>
+      'Your email is confirmed, but this account has no role yet. Ask the '
+      'admin to add it to the profiles table as ${role?.name ?? 'resident or '
+          'guardian'} (Build Guide 3.5), then log in.';
+
+  /// Signed in through the email link (or a restored session): reads the
+  /// role from profiles. Returns the role, or null with [error] set and the
+  /// session signed out.
+  Future<({UserRole? role, String? error})> completeLinkSignIn() async {
+    final user = currentUser;
+    if (user == null) return (role: null, error: null);
+    try {
+      final role = await _loadProfile(user);
+      if (role != null) return (role: role, error: null);
+      final wanted = _roleFrom(user.userMetadata?['role']);
+      await signOut();
+      return (role: null, error: _noRoleMessage(wanted));
+    } catch (e) {
+      debugPrint('[SupabaseService] completeLinkSignIn: $e');
+      await signOut();
+      return (
+        role: null,
+        error: 'Could not read your role. Check your internet connection '
+            'and log in again.'
+      );
+    }
+  }
+
+  /// Signs in with email + password and checks profiles.role against the
+  /// button the user chose. Returns null on success or a message to show.
   Future<String?> signIn({
     required UserRole role,
-    required String identifier,
     required String email,
     required String password,
   }) async {
@@ -98,86 +169,155 @@ class SupabaseService {
       return null;
     }
 
+    signingIn = true;
     try {
       final res = await client.auth
           .signInWithPassword(email: email, password: password);
       final user = res.user;
       if (user == null) return 'Sign-in failed. Please try again.';
-
-      final profile = await client
-          .from('profiles')
-          .select('role, display_name')
-          .eq('user_id', user.id)
-          .maybeSingle();
-      final registered = _roleFrom(profile?['role']);
-      if (registered == null) {
-        await client.auth.signOut();
-        return 'This account has no role yet. Add it to the profiles table '
-            'in Supabase as resident or guardian (Build Guide 3.5).';
-      }
-      if (registered != role) {
-        await client.auth.signOut();
-        final name = registered == UserRole.guardian ? 'GUARDIAN' : 'RESIDENT';
-        return 'This is a ${registered.name} account. Go back and choose '
-            '"$name" to sign in.';
-      }
-      cachedRole = registered;
-      displayName = profile?['display_name'] as String?;
-      return null;
+      return await _checkRole(user, role);
     } on AuthException catch (e) {
-      final msg = e.message.toLowerCase();
-      if (msg.contains('invalid login credentials') ||
-          msg.contains('invalid email or password') ||
-          msg.contains('user not found')) {
-        return 'Incorrect email or password.';
-      }
-      if (msg.contains('email not confirmed') || msg.contains('confirm')) {
-        return 'This email is not confirmed yet. In Supabase, create the user '
-            'with "Auto Confirm User" on, or confirm it from the email.';
-      }
-      if (msg.contains('too many requests') || msg.contains('rate limit')) {
-        return 'Too many attempts. Please wait a moment and try again.';
-      }
-      return e.message;
+      return authErrorMessage(e);
     } on PostgrestException catch (e) {
       await client.auth.signOut();
       return 'Could not read your role from profiles: ${e.message}';
     } catch (e) {
       return 'Sign-in failed. Check your internet connection and try again.';
+    } finally {
+      signingIn = false;
     }
   }
 
-  /// Creates a Supabase Auth user. In v4 the role row in profiles is added by
-  /// hand (Build Guide 3.5): the app's key cannot write to any table.
-  Future<String?> signUp({
+  /// Null when the profile's role matches [chosen]; otherwise signs out and
+  /// returns the message to show.
+  Future<String?> _checkRole(User user, UserRole chosen) async {
+    final registered = await _loadProfile(user);
+    if (registered == null) {
+      await signOut();
+      return 'This account has no role yet. Ask the admin to add it to the '
+          'profiles table as ${chosen.name} (Build Guide 3.5).';
+    }
+    if (registered != chosen) {
+      await signOut();
+      final name = registered == UserRole.guardian ? 'GUARDIAN' : 'RESIDENT';
+      return 'This is a ${registered.name} account. Go back and choose '
+          '"$name" to log in.';
+    }
+    return null;
+  }
+
+  /// Readable text for a Supabase Auth error.
+  static String authErrorMessage(AuthException e) {
+    final msg = e.message.toLowerCase();
+    if (msg.contains('invalid login credentials') ||
+        msg.contains('invalid email or password') ||
+        msg.contains('user not found')) {
+      return 'Wrong email or password.';
+    }
+    if (msg.contains('email not confirmed') || e.code == 'email_not_confirmed') {
+      return emailNotConfirmedMessage;
+    }
+    if (msg.contains('already registered') || msg.contains('already exists')) {
+      return 'An account with this email already exists. Log in instead.';
+    }
+    if (msg.contains('password should be') || msg.contains('weak password')) {
+      return 'Password is too weak. Use at least 6 characters.';
+    }
+    if (msg.contains('too many requests') ||
+        msg.contains('rate limit') ||
+        msg.contains('security purposes')) {
+      return 'Too many attempts. Please wait a minute and try again.';
+    }
+    if (msg.contains('redirect')) {
+      return 'Supabase refused the app link. Add $mobileAuthRedirect to '
+          'Authentication -> URL Configuration -> Redirect URLs.';
+    }
+    return e.message;
+  }
+
+  /// Creates a Supabase Auth user. The name and chosen role go into the
+  /// user metadata; the profiles row is added by the admin (Build Guide 3.5),
+  /// since the app's key cannot write to any table.
+  ///
+  /// When "Confirm email" is on, Supabase sends the email with a link back
+  /// into the app ([emailRedirectTo]) and [SignUpOutcome.checkEmail] is
+  /// returned. When it's off, a session comes back at once and the user is
+  /// signed in ([SignUpOutcome.signedIn]) if the role is in profiles.
+  Future<({SignUpOutcome outcome, String? message})> signUp({
     required UserRole role,
-    required String identifier,
+    required String displayName,
     required String email,
     required String password,
   }) async {
     if (!isAvailable) {
-      return 'Supabase is not configured in this build (env.json).';
+      return (
+        outcome: SignUpOutcome.error,
+        message: 'Sign up needs Supabase, which is not in this build '
+            '(env.json). Use Log in for the demo.'
+      );
     }
+    signingIn = true;
     try {
-      final res = await client.auth.signUp(email: email, password: password);
-      if (res.user == null) {
-        return 'Registration failed. Please try again.';
+      final res = await client.auth.signUp(
+        email: email,
+        password: password,
+        emailRedirectTo: emailRedirectTo,
+        data: {'display_name': displayName, 'role': role.name},
+      );
+      final user = res.user;
+      if (user == null) {
+        return (
+          outcome: SignUpOutcome.error,
+          message: 'Sign up failed. Please try again.'
+        );
       }
-      if (res.session != null) await client.auth.signOut();
-      return 'Account created. Before signing in, confirm the email if '
-          'Supabase sent one, and ask the admin to add this account to '
-          'profiles as ${role.name}.';
+      // Supabase hides "already registered" behind a user with no
+      // identities (when Confirm email is on).
+      if (user.identities != null && user.identities!.isEmpty) {
+        return (
+          outcome: SignUpOutcome.error,
+          message: 'An account with this email already exists. Log in instead.'
+        );
+      }
+      if (res.session == null) {
+        return (outcome: SignUpOutcome.checkEmail, message: null);
+      }
+      final err = await _checkRole(user, role);
+      return err == null
+          ? (outcome: SignUpOutcome.signedIn, message: null)
+          : (outcome: SignUpOutcome.error, message: err);
     } on AuthException catch (e) {
-      final msg = e.message.toLowerCase();
-      if (msg.contains('already registered') || msg.contains('already exists')) {
-        return 'An account with this email already exists. Try logging in.';
-      }
-      if (msg.contains('password should be') || msg.contains('weak password')) {
-        return 'Password is too weak. Use at least 6 characters.';
-      }
-      return e.message;
+      return (outcome: SignUpOutcome.error, message: authErrorMessage(e));
+    } on PostgrestException catch (e) {
+      await client.auth.signOut();
+      return (
+        outcome: SignUpOutcome.error,
+        message: 'Could not read your role from profiles: ${e.message}'
+      );
     } catch (e) {
-      return 'Sign-up failed. Check your internet connection and try again.';
+      return (
+        outcome: SignUpOutcome.error,
+        message: 'Sign up failed. Check your internet connection and try again.'
+      );
+    } finally {
+      signingIn = false;
+    }
+  }
+
+  /// Sends the confirmation email again. Returns null on success.
+  Future<String?> resendConfirmation(String email) async {
+    if (!isAvailable) return 'Supabase is not configured in this build.';
+    try {
+      await client.auth.resend(
+        type: OtpType.signup,
+        email: email,
+        emailRedirectTo: emailRedirectTo,
+      );
+      return null;
+    } on AuthException catch (e) {
+      return authErrorMessage(e);
+    } catch (e) {
+      return 'Could not send the email. Check your internet connection.';
     }
   }
 
