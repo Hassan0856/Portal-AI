@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
 import '../core/app_colors.dart';
 
 enum UserRole { resident, guardian }
@@ -136,22 +137,6 @@ class AppSettings {
       );
 }
 
-class StatItem {
-  const StatItem({
-    required this.label,
-    required this.value,
-    required this.trend,
-    required this.positive,
-    required this.icon,
-    required this.badgeColor,
-    required this.iconColor,
-  });
-  final String label, value, trend;
-  final bool positive;
-  final IconData icon;
-  final Color badgeColor, iconColor;
-}
-
 const _months = [
   'Jan',
   'Feb',
@@ -174,4 +159,22 @@ String fmtStamp(DateTime d) {
   final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
   final ap = d.hour >= 12 ? 'PM' : 'AM';
   return '${fmtDate(d)} · ${h.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')} $ap';
+}
+
+/// Text from a push or a messages row, made readable: n8n template code that
+/// was never filled in ("{{ \$json.x }}") and raw JSON are removed.
+String cleanPushText(Object? v) {
+  var s = '${v ?? ''}'
+      .replaceAll(RegExp(r'\{\{[\s\S]*?\}\}'), '')
+      .replaceAll('\r', '')
+      .trim();
+  if (s.startsWith('{') && s.endsWith('}')) {
+    try {
+      final o = jsonDecode(s);
+      if (o is Map) {
+        s = '${o['body'] ?? o['text'] ?? o['description'] ?? o['message'] ?? o['reason'] ?? ''}';
+      }
+    } catch (_) {/* not JSON: keep the text */}
+  }
+  return s.trim();
 }

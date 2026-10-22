@@ -6,6 +6,7 @@ import '../core/app_colors.dart';
 import '../models/models.dart';
 import '../providers/providers.dart';
 import '../services/supabase_service.dart';
+import '../widgets/emergency_widgets.dart';
 import '../widgets/glass.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -15,189 +16,108 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final s = ref.watch(settingsProvider);
     final n = ref.read(settingsProvider.notifier);
-    final role = ref.watch(authProvider);
+    final isGuardian = ref.watch(authProvider) == UserRole.guardian;
+    final links = ref.watch(linksProvider).valueOrNull;
     return PortalAppShell(
+      tab: 3,
       child: PageBody(children: [
-        const PageHeading(
-            title: 'Settings',
-            description: 'Manage your notifications and security preferences.'),
-        if (role == UserRole.guardian)
-          GlassCard(
-            onTap: () => context.push('/settings/resident-emails'),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const GlassIconBadge(icon: Icons.alternate_email_rounded),
-              const SizedBox(width: 14),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Resident Email Management',
-                        style: TextStyle(
-                            fontSize: 20, fontWeight: FontWeight.w700)),
-                    SizedBox(height: 4),
-                    Text(
-                        'Manage contact email addresses for authorized residents.',
-                        style: TextStyle(
-                            color: AppColors.secondary,
-                            fontSize: 15,
-                            height: 1.35)),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right_rounded,
-                  color: AppColors.secondary),
-            ]),
-          ),
+        const SectionLabel('Family'),
         GlassCard(
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const _RowHead(
-                icon: Icons.notifications_none_rounded,
-                title: 'Notifications',
-                desc: 'Get alerts for important activity and system updates.'),
-            const SizedBox(height: 16),
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: .6),
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: Colors.white),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: Column(children: [
+            GlassListRow(
+              icon: Icons.family_restroom_rounded,
+              title: 'Family links',
+              subtitle: links == null
+                  ? (isGuardian
+                      ? 'Residents you look after'
+                      : 'Guardians who get your alerts')
+                  : '${links.length} linked',
+              onTap: () => context.push('/settings/family'),
+            ),
+            if (isGuardian) ...[
+              const GlassDivider(),
+              GlassListRow(
+                icon: Icons.alternate_email_rounded,
+                title: 'Contact emails',
+                subtitle: 'Email addresses for your residents',
+                onTap: () => context.push('/settings/resident-emails'),
               ),
-              child: Column(children: [
-                _ToggleRow(
-                    icon: Icons.settings_outlined,
-                    label: 'System updates',
-                    value: s.systemUpdates,
-                    onChanged: n.setSystemUpdates),
-                Divider(
-                    height: 1, color: AppColors.muted.withValues(alpha: .25)),
-                _ToggleRow(
-                    icon: Icons.directions_run_rounded,
-                    label: 'Activity alerts (1–3)',
-                    value: s.activityAlerts,
-                    onChanged: n.setActivityAlerts),
-              ]),
+            ],
+          ]),
+        ),
+        const SectionLabel('Notifications'),
+        GlassCard(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: Column(children: [
+            const GlassListRow(
+              icon: Icons.notifications_active_outlined,
+              title: 'Door alerts',
+              subtitle: 'Always on',
+              trailing: Icon(Icons.lock_outline_rounded,
+                  size: 18, color: AppColors.muted),
+            ),
+            const GlassDivider(),
+            GlassListRow(
+              icon: Icons.sensors_rounded,
+              title: 'Sensor status',
+              subtitle: 'When the door sensor goes offline',
+              trailing: GlassToggleSwitch(
+                  value: s.systemUpdates, onChanged: n.setSystemUpdates),
+            ),
+            const GlassDivider(),
+            GlassListRow(
+              icon: Icons.summarize_outlined,
+              title: 'Daily digest',
+              subtitle: 'A short summary every evening',
+              trailing: GlassToggleSwitch(
+                  value: s.activityAlerts, onChanged: n.setActivityAlerts),
+            ),
+            if (isGuardian) ...[
+              const GlassDivider(),
+              GlassListRow(
+                icon: Icons.campaign_outlined,
+                title: 'Test SOS alarm',
+                subtitle: 'Hear the alarm on this phone',
+                onTap: () => showSosSheet(context),
+              ),
+            ],
+          ]),
+        ),
+        const SectionLabel('Privacy and help'),
+        GlassCard(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: Column(children: [
+            GlassListRow(
+              icon: Icons.face_retouching_natural_outlined,
+              title: 'Picture recognition',
+              subtitle: 'The resident’s reference photo',
+              onTap: () => context.push('/settings/picture-recognition'),
+            ),
+            const GlassDivider(),
+            GlassListRow(
+              icon: Icons.storage_rounded,
+              title: 'Privacy & storage',
+              subtitle: 'How long photos and messages are kept',
+              onTap: () => context.push('/settings/privacy'),
+            ),
+            const GlassDivider(),
+            GlassListRow(
+              icon: Icons.help_outline_rounded,
+              title: 'Help & About',
+              subtitle: 'How Portal AI works and the risk scale',
+              onTap: () => context.push('/help'),
             ),
           ]),
         ),
-        GlassCard(
-          onTap: () => context.push('/settings/picture-recognition'),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const GlassIconBadge(icon: Icons.visibility_outlined),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      const Flexible(
-                          child: Text('Picture Recognition',
-                              style: TextStyle(
-                                  fontSize: 20, fontWeight: FontWeight.w700))),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 3),
-                        decoration: BoxDecoration(
-                            color: AppColors.heat[0],
-                            borderRadius: BorderRadius.circular(12)),
-                        child: const Text('Required',
-                            style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF3F8F7C))),
-                      ),
-                    ]),
-                    const SizedBox(height: 4),
-                    const Text('Upload your photo manually.',
-                        style: TextStyle(
-                            color: AppColors.secondary, fontSize: 15)),
-                    const SizedBox(height: 6),
-                    const Text(
-                        'Cannot be disabled as it’s essential for detecting and analysing activity.',
-                        style: TextStyle(
-                            color: AppColors.muted,
-                            fontSize: 13.5,
-                            height: 1.35)),
-                  ]),
-            ),
-            const Icon(Icons.chevron_right_rounded, color: AppColors.secondary),
-          ]),
-        ),
-        GlassCard(
-          onTap: () => context.push('/settings/privacy'),
-          child: const Row(children: [
-            GlassIconBadge(icon: Icons.storage_rounded),
-            SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Privacy & Storage',
-                        style: TextStyle(
-                            fontSize: 20, fontWeight: FontWeight.w700)),
-                    SizedBox(height: 4),
-                    Text('View data retention policies and storage details.',
-                        style: TextStyle(
-                            color: AppColors.secondary,
-                            fontSize: 15,
-                            height: 1.35)),
-                  ]),
-            ),
-            Icon(Icons.chevron_right_rounded, color: AppColors.secondary),
-          ]),
+        GlassButton(
+          label: 'Log out',
+          icon: Icons.logout_rounded,
+          onPressed: () => ref.read(authProvider.notifier).logout(),
         ),
       ]),
     );
   }
-}
-
-class _RowHead extends StatelessWidget {
-  const _RowHead({required this.icon, required this.title, required this.desc});
-  final IconData icon;
-  final String title, desc;
-  @override
-  Widget build(BuildContext context) =>
-      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        GlassIconBadge(icon: icon),
-        const SizedBox(width: 14),
-        Expanded(
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title,
-                style:
-                    const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 4),
-            Text(desc,
-                style: const TextStyle(
-                    color: AppColors.secondary, fontSize: 15, height: 1.35)),
-          ]),
-        ),
-      ]);
-}
-
-class _ToggleRow extends StatelessWidget {
-  const _ToggleRow(
-      {required this.icon,
-      required this.label,
-      required this.value,
-      required this.onChanged});
-  final IconData icon;
-  final String label;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Row(children: [
-          Icon(icon, color: AppColors.iconBlue),
-          const SizedBox(width: 14),
-          Expanded(
-              child: Text(label,
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w600))),
-          GlassToggleSwitch(value: value, onChanged: onChanged),
-        ]),
-      );
 }
 
 class _InfoPage extends StatelessWidget {
@@ -327,7 +247,6 @@ class PrivacyStorageScreen extends StatelessWidget {
                       style: TextStyle(color: AppColors.muted, fontSize: 13.5)),
                 ]),
           ),
-          const RetentionNotice(),
         ],
       );
 }

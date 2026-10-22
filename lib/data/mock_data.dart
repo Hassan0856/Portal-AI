@@ -1,31 +1,5 @@
-import 'package:flutter/material.dart';
-import '../core/app_colors.dart';
+/// Sample data, shown only when the build has no Supabase (demo mode).
 import '../models/models.dart';
-
-/// Sample data only. Replace the providers that expose these lists with
-/// real API-backed services when a backend is available.
-const heatmapDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const heatmapSlots = ['12AM', '3AM', '6AM', '9AM', '12PM', '3PM', '6PM', '9PM'];
-
-const mockHeatmap = <List<int>>[
-  [0, 0, 1, 2, 2, 1, 1, 0],
-  [0, 1, 2, 3, 3, 2, 2, 1],
-  [1, 0, 2, 3, 2, 3, 2, 1],
-  [0, 1, 1, 2, 3, 2, 3, 2],
-  [1, 0, 2, 2, 3, 3, 1, 1],
-  [0, 1, 2, 3, 2, 2, 2, 2],
-  [0, 0, 1, 1, 2, 1, 1, 0],
-];
-
-/// Event types as the app labels v4 events.event_type
-/// (see SupabaseService.eventTypeLabel).
-const eventTypes = [
-  'All types',
-  'Motion',
-  'Visitor',
-  'Inactivity',
-  'Sensor offline',
-];
 
 final mockEvents = <SecurityEvent>[
   SecurityEvent(
@@ -105,35 +79,5 @@ final mockMessages = <AppMessage>[
     title: 'General Message',
     timestamp: DateTime(2026, 10, 10, 9, 20),
     description: 'Welcome to PORTAL AI. Stay safe!',
-  ),
-];
-
-const mockStats = <StatItem>[
-  StatItem(
-    label: 'Total Events',
-    value: '124',
-    trend: '↑ 12%',
-    positive: true,
-    icon: Icons.shield_outlined,
-    badgeColor: AppColors.paleLavender,
-    iconColor: AppColors.iconBlue,
-  ),
-  StatItem(
-    label: 'High Risk Events',
-    value: '18',
-    trend: '↑ 5%',
-    positive: false,
-    icon: Icons.warning_amber_rounded,
-    badgeColor: Color(0xFFF3BBD0),
-    iconColor: AppColors.high,
-  ),
-  StatItem(
-    label: 'Avg. Risk Score',
-    value: '3.2',
-    trend: '↓ 18%',
-    positive: true,
-    icon: Icons.notifications_none_rounded,
-    badgeColor: Color(0xFFC8D9FF),
-    iconColor: AppColors.iconBlue,
   ),
 ];

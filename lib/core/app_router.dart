@@ -6,6 +6,7 @@ import '../providers/providers.dart';
 import '../screens/auth_screens.dart';
 import '../screens/dashboard_screen.dart';
 import '../screens/gallery_screens.dart';
+import '../screens/family_screen.dart';
 import '../screens/help_screen.dart';
 import '../screens/guardian_email_screen.dart';
 import '../screens/messages_screens.dart';
@@ -46,6 +47,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Setup gate (Build Guide 9.1 / 9.7): until a reference photo of the
       // resident exists, open Picture Recognition instead of the dashboard.
       if (loc == '/dashboard' &&
+          role == UserRole.resident &&
           ref.read(residentFaceProvider).valueOrNull == false) {
         return '/settings/picture-recognition';
       }
@@ -66,6 +68,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/settings',
         builder: (_, __) => const SettingsScreen(),
         routes: [
+          GoRoute(
+            path: 'family',
+            builder: (_, __) => const FamilyScreen(),
+          ),
           GoRoute(
             path: 'resident-emails',
             builder: (_, __) => const GuardianEmailScreen(),

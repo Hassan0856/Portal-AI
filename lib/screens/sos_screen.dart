@@ -101,11 +101,12 @@ class _SosScreenState extends ConsumerState<SosScreen> {
     final imageUrl = '${widget.data['image_url'] ?? ''}'.isNotEmpty
         ? '${widget.data['image_url']}'
         : (event?.hasLivePhoto == true ? event!.snapshotUrl : null);
-    final title = '${widget.data['title'] ?? ''}'.isNotEmpty
-        ? '${widget.data['title']}'
+    final title = cleanPushText(widget.data['title']).isNotEmpty
+        ? cleanPushText(widget.data['title'])
         : 'Door alert';
-    final body = '${widget.data['body'] ?? ''}'.isNotEmpty
-        ? '${widget.data['body']}'
+    final pushBody = cleanPushText(widget.data['body']);
+    final body = pushBody.isNotEmpty
+        ? pushBody
         : (event?.reason ?? event?.description ?? '');
 
     return PopScope(
