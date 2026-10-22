@@ -132,15 +132,20 @@ create policy "Guardians and residents can view their links"
   using (auth.uid() = guardian_user_id or auth.uid() = resident_user_id);
 
 -- Profiles: your own, plus the names of people you are linked to.
+-- (The link check runs in a security-definer function so the profiles and
+-- links policies never call each other; see 20261022b for the full fix.)
+create or replace function public.is_linked_with(p_user uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from guardian_resident_links l
+                  where (l.guardian_user_id = auth.uid() and l.resident_user_id = p_user)
+                     or (l.resident_user_id = auth.uid() and l.guardian_user_id = p_user));
+$$;
 alter table public.profiles enable row level security;
 drop policy if exists "Guardians can view linked resident profiles" on public.profiles;
 drop policy if exists "linked profiles" on public.profiles;
 create policy "linked profiles" on public.profiles
   for select to authenticated
-  using (user_id = auth.uid()
-         or exists (select 1 from guardian_resident_links l
-                     where (l.guardian_user_id = auth.uid() and l.resident_user_id = profiles.user_id)
-                        or (l.resident_user_id = auth.uid() and l.guardian_user_id = profiles.user_id)));
+  using (user_id = auth.uid() or public.is_linked_with(user_id));
 
 -- ─── 4. Tag every message with its resident ──────────────────────────
 
