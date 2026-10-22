@@ -104,11 +104,21 @@ class SupabaseService {
   /// Reads profiles.role / display_name for [user] into the cache. The name
   /// falls back to the one given at sign up (user metadata).
   Future<UserRole?> _loadProfile(User user) async {
-    final profile = await client
+    var profile = await client
         .from('profiles')
         .select('role, display_name')
         .eq('user_id', user.id)
         .maybeSingle();
+    // No row yet (signed up before the auto-create trigger, or the trigger
+    // is missing): create it from the role chosen at sign up.
+    if (profile == null) {
+      try {
+        final made = await client.rpc('ensure_my_profile');
+        if (made is Map) profile = Map<String, dynamic>.from(made);
+      } catch (e) {
+        debugPrint('[SupabaseService] ensure_my_profile: $e');
+      }
+    }
     final role = _roleFrom(profile?['role']);
     if (role == null) return null;
     cachedRole = role;
@@ -147,8 +157,10 @@ class SupabaseService {
       await signOut();
       return (
         role: null,
-        error: 'Could not read your role. Check your internet connection '
-            'and log in again.'
+        error: e is PostgrestException
+            ? profileErrorMessage(e)
+            : 'Could not read your role. Check your internet connection '
+                'and log in again.'
       );
     }
   }
@@ -178,7 +190,7 @@ class SupabaseService {
       return authErrorMessage(e);
     } on PostgrestException catch (e) {
       await client.auth.signOut();
-      return 'Could not read your role from profiles: ${e.message}';
+      return profileErrorMessage(e);
     } catch (e) {
       return 'Sign-in failed. Check your internet connection and try again.';
     } finally {
@@ -192,8 +204,8 @@ class SupabaseService {
     final registered = await _loadProfile(user);
     if (registered == null) {
       await signOut();
-      return 'This account has no role yet. Ask the admin to add it to the '
-          'profiles table as ${chosen.name} (Build Guide 3.5).';
+      return 'This account has no role yet. Sign up again as ${chosen.name}, '
+          'or ask the admin to add it to the profiles table.';
     }
     if (registered != chosen) {
       await signOut();
@@ -202,6 +214,15 @@ class SupabaseService {
           '"$name" to log in.';
     }
     return null;
+  }
+
+  /// Readable text when the profiles table can't be read.
+  static String profileErrorMessage(PostgrestException e) {
+    if (e.code == '42P17' || e.message.contains('infinite recursion')) {
+      return 'The server\'s access rules for profiles need a fix. Run '
+          '20261022b_profiles_signup_fix.sql in Supabase, then log in again.';
+    }
+    return 'Could not read your account role. Please try again.';
   }
 
   /// Readable text for a Supabase Auth error.
@@ -290,7 +311,7 @@ class SupabaseService {
       await client.auth.signOut();
       return (
         outcome: SignUpOutcome.error,
-        message: 'Could not read your role from profiles: ${e.message}'
+        message: profileErrorMessage(e)
       );
     } catch (e) {
       return (
