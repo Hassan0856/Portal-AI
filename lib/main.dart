@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'core/app_colors.dart';
 import 'core/app_router.dart';
+import 'providers/providers.dart';
 import 'services/firebase_service.dart';
 import 'services/supabase_service.dart';
 
@@ -30,18 +30,9 @@ Future<void> _start() async {
   // Push and the SOS alarm (Android only; skipped on web)
   await _step('Firebase', FirebaseService.instance.initialize);
 
-  // A saved login: read its role again and re-apply the alert topic, which
-  // repairs a phone whose topic subscription was lost.
+  // A saved login: read its role again. The push topics are then set by
+  // pushTopicsProvider (own household only).
   await _step('Session', SupabaseService.instance.restoreSession);
-  await _step('Topics', () async {
-    final role = SupabaseService.instance.cachedRole;
-    if (role == null) return;
-    final prefs = await SharedPreferences.getInstance();
-    unawaited(FirebaseService.instance.applyRoleTopics(role,
-        status: prefs.getBool('systemUpdates') ?? true,
-        digest: prefs.getBool('activityAlerts') ?? true));
-  });
-
   runApp(const ProviderScope(child: PortalApp()));
 }
 
@@ -73,12 +64,15 @@ class _PortalAppState extends ConsumerState<PortalApp> {
 
   @override
   Widget build(BuildContext context) {
+    // Keeps push topics on this household only (never rebuilds the app).
+    ref.watch(pushTopicsProvider);
     return MaterialApp.router(
       title: 'PortalAI',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
       scaffoldMessengerKey: FirebaseService.messengerKey,
       routerConfig: ref.watch(routerProvider),
+
     );
   }
 }

@@ -44,13 +44,11 @@ class _MessageHistoryScreenState extends ConsumerState<MessageHistoryScreen> {
       _ => all,
     };
     return PortalAppShell(
+      tab: 2,
       child: PageBody(children: [
-        const PageHeading(
-            title: 'Message History',
-            description: 'View your received alerts and messages.',
-            icon: Icons.chat_bubble_outline_rounded),
+        const SectionLabel('Notifications from the last 30 days'),
         GlassFilterTabs(
-            labels: const ['All', 'High Risk', 'Other'],
+            labels: const ['All', 'Alerts', 'Other'],
             selected: _tab,
             onChanged: (i) => setState(() => _tab = i)),
         if (list.isEmpty)
@@ -66,7 +64,6 @@ class _MessageHistoryScreenState extends ConsumerState<MessageHistoryScreen> {
               const SizedBox(height: 14),
             ],
           ]),
-        const RetentionNotice(),
       ]),
     );
   }
@@ -103,7 +100,7 @@ class _MessageCard extends StatelessWidget {
               if (m.score != null) RiskScoreBadge(score: m.score!),
             ]),
             const SizedBox(height: 4),
-            Text(fmtStamp(m.timestamp),
+            Text(fmtWhen(m.timestamp),
                 style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
             if (m.location != null)
               Padding(
@@ -119,14 +116,12 @@ class _MessageCard extends StatelessWidget {
               ),
             const SizedBox(height: 6),
             Text(m.description,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                     fontSize: 14, color: AppColors.secondary, height: 1.35)),
           ]),
         ),
-        if (m.isHighRisk && m.location != null) ...[
-          const SizedBox(width: 8),
-          SnapshotThumb(location: m.location!, size: 54, tint: a.bg),
-        ],
         const Icon(Icons.chevron_right_rounded, color: AppColors.secondary),
       ]),
     );
@@ -150,14 +145,6 @@ class MessageDetailScreen extends ConsumerWidget {
           GlassCard(
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              if (m.location != null && m.isHighRisk) ...[
-                Center(
-                    child: SnapshotThumb(
-                        location: m.location!,
-                        size: 160,
-                        tint: accentFor(m.kind).bg)),
-                const SizedBox(height: 16),
-              ],
               if (m.score != null) ...[
                 Row(children: [
                   RiskScoreBadge(score: m.score!, large: true),

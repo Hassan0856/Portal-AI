@@ -112,7 +112,6 @@ class HelpAboutScreen extends StatelessWidget {
           onTap: () => _detail(context, 'Privacy & Data Retention',
               const Text(_privacyText, style: TextStyle(height: 1.45))),
         ),
-        const RetentionNotice(),
       ]),
     );
   }

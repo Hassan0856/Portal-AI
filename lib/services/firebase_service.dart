@@ -5,24 +5,33 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../core/app_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 
 // Push notifications through Firebase Cloud Messaging (Build Guide v4, 4.4,
 // 4.5, 9.2 and 9.5). n8n WF-00 sends to topics; the app only subscribes.
 //
-//   portal_resident  resident login: ordinary notifications
-//   portal_guardian  guardian login: ordinary notifications, plus a data-only
-//                    SOS message for Stage 2 alerts and inactivity
-//   portal_status    optional: sensor offline   (Settings: "System updates")
-//   portal_digest    optional: daily digest     (Settings: "Activity alerts")
+// v4.1: every topic belongs to one household (one resident), so a push only
+// reaches that resident and the guardians linked to them:
+//
+//   portal_<resident id>_resident  the resident: ordinary notifications
+//   portal_<resident id>_guardian  linked guardians: ordinary notifications,
+//                                  plus the data-only SOS alarm
+//   portal_<resident id>_status    optional: sensor offline (Settings)
+//   portal_<resident id>_digest    optional: daily digest  (Settings)
+//
+// The old shared topics (portal_resident, portal_guardian, portal_status,
+// portal_digest) reached every phone; the app now leaves them.
 //
 // Firebase is used for push only. Push, the SOS alarm and the flashlight are
 // Android-only; on web every method here returns without doing anything.
 
-const kTopicResident = 'portal_resident';
-const kTopicGuardian = 'portal_guardian';
-const kTopicStatus = 'portal_status';
-const kTopicDigest = 'portal_digest';
+const kLegacyTopics = [
+  'portal_resident',
+  'portal_guardian',
+  'portal_status',
+  'portal_digest',
+];
 
 const kSosId = 999;
 
@@ -78,8 +87,8 @@ Future<void> showSosAlarm(Map<String, dynamic> data) async {
       ?.createNotificationChannel(kSosChannel);
   await plugin.show(
     id: kSosId,
-    title: 'SOS · ${data['title'] ?? 'Door alert'}',
-    body: data['body'] as String?,
+    title: 'SOS · ${_or(cleanPushText(data['title']), 'Door alert')}',
+    body: _or(cleanPushText(data['body']), 'Open Portal AI now.'),
     notificationDetails: NotificationDetails(
       android: AndroidNotificationDetails(
         kSosChannel.id,
@@ -99,6 +108,8 @@ Future<void> showSosAlarm(Map<String, dynamic> data) async {
     payload: _sosPayload(data),
   );
 }
+
+String _or(String s, String fallback) => s.isEmpty ? fallback : s;
 
 /// The notification payload carries the SOS data so a tap can rebuild it.
 String _sosPayload(Map<String, dynamic> data) => [
@@ -174,8 +185,22 @@ class FirebaseService {
           showSosAlarm(m.data);
           openSos(m.data);
         } else {
+          final title = _or(
+              cleanPushText(m.notification?.title ?? m.data['title']),
+              'New door event');
+          final body = cleanPushText(m.notification?.body ?? m.data['body']);
           messengerKey.currentState?.showSnackBar(SnackBar(
-            content: Text(m.notification?.title ?? 'New door event'),
+            duration: const Duration(seconds: 6),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                if (body.isNotEmpty)
+                  Text(body, maxLines: 3, overflow: TextOverflow.ellipsis),
+              ],
+            ),
             action: (m.data['event_id'] ?? '').toString().isEmpty
                 ? null
                 : SnackBarAction(
@@ -221,40 +246,57 @@ class FirebaseService {
   void openSos(Map<String, dynamic> data) =>
       appRouter?.push('/sos', extra: Map<String, dynamic>.from(data));
 
-  // ───────────────────────── Topics (9.2, 9.4) ─────────────────────────
+  // ───────────────────────── Topics (v4.1) ─────────────────────────
 
-  /// Subscribes to exactly one role topic, plus the optional topics the
-  /// user switched on. A signed-out phone (role null) gets nothing.
-  Future<void> applyRoleTopics(UserRole? role,
-      {bool status = true, bool digest = true}) async {
-    if (!isAvailable) return;
-    final fcm = FirebaseMessaging.instance;
-    try {
-      await fcm.unsubscribeFromTopic(kTopicResident);
-      await fcm.unsubscribeFromTopic(kTopicGuardian);
-      if (role == null) {
-        await fcm.unsubscribeFromTopic(kTopicStatus);
-        await fcm.unsubscribeFromTopic(kTopicDigest);
-        return;
-      }
-      await fcm.subscribeToTopic(
-          role == UserRole.guardian ? kTopicGuardian : kTopicResident);
-      await setTopic(kTopicStatus, status);
-      await setTopic(kTopicDigest, digest);
-      if (role == UserRole.guardian) await _askGuardianPermissions();
-    } catch (e) {
-      debugPrint('[FirebaseService] Topic update failed: $e');
-    }
+  /// The topics this phone should be on. A resident follows their own
+  /// household; a guardian follows each linked resident. Nobody else's.
+  static Set<String> topicsFor({
+    required UserRole? role,
+    required String? userId,
+    List<String> linkedResidentIds = const [],
+    bool status = true,
+    bool digest = true,
+  }) {
+    if (role == null) return const {};
+    final homes = role == UserRole.resident
+        ? [if (userId != null && userId.isNotEmpty) userId]
+        : linkedResidentIds;
+    return {
+      for (final h in homes) ...[
+        'portal_${h}_${role == UserRole.guardian ? 'guardian' : 'resident'}',
+        if (status) 'portal_${h}_status',
+        if (digest) 'portal_${h}_digest',
+      ],
+    };
   }
 
-  Future<void> setTopic(String topic, bool on) async {
+  static const _prefsKey = 'fcmTopics';
+  Future<void> _sync = Future.value();
+
+  /// Moves this phone onto exactly [topics]: leaves the old shared topics
+  /// and any household it is no longer linked to. Calls run one at a time.
+  Future<void> syncTopics(Set<String> topics, {UserRole? role}) {
+    _sync = _sync.then((_) => _doSync(topics, role)).catchError((Object e) {
+      debugPrint('[FirebaseService] Topic update failed: $e');
+    });
+    return _sync;
+  }
+
+  Future<void> _doSync(Set<String> topics, UserRole? role) async {
     if (!isAvailable) return;
-    try {
-      on
-          ? await FirebaseMessaging.instance.subscribeToTopic(topic)
-          : await FirebaseMessaging.instance.unsubscribeFromTopic(topic);
-    } catch (e) {
-      debugPrint('[FirebaseService] $topic: $e');
+    final prefs = await SharedPreferences.getInstance();
+    final before = {...?prefs.getStringList(_prefsKey), ...kLegacyTopics};
+    final fcm = FirebaseMessaging.instance;
+    for (final t in before.difference(topics)) {
+      await fcm.unsubscribeFromTopic(t);
+    }
+    // Subscribing again is harmless and repairs a lost subscription.
+    for (final t in topics) {
+      await fcm.subscribeToTopic(t);
+    }
+    await prefs.setStringList(_prefsKey, topics.toList());
+    if (role == UserRole.guardian && topics.isNotEmpty) {
+      await _askGuardianPermissions();
     }
   }
 

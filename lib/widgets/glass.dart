@@ -591,7 +591,7 @@ class _CameraPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter old) => false;
 }
 
-// ───────────────────────── Header, drawer, shell ─────────────────────────
+// ───────────────────────── Header, bottom bar, shell ─────────────────────────
 
 class _CurveClipper extends CustomClipper<Path> {
   @override
@@ -624,40 +624,40 @@ class _EdgePainter extends CustomPainter {
 }
 
 class _CircleBtn extends StatelessWidget {
-  const _CircleBtn({required this.icon, this.onTap});
+  const _CircleBtn({required this.icon, this.onTap, this.tooltip});
   final IconData icon;
   final VoidCallback? onTap;
+  final String? tooltip;
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: Colors.white.withValues(alpha: .65),
-          border: Border.all(color: Colors.white),
-          boxShadow: const [
-            BoxShadow(
-                color: Color(0x336877AD), blurRadius: 10, offset: Offset(0, 4))
-          ],
-        ),
-        child: Icon(icon, color: AppColors.iconBlue, size: 22),
+    final btn = Container(
+      width: 44,
+      height: 44,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.white.withValues(alpha: .65),
+        border: Border.all(color: Colors.white),
       ),
+      child: Icon(icon, color: AppColors.iconBlue, size: 22),
+    );
+    if (onTap == null) return btn;
+    return Semantics(
+      button: true,
+      label: tooltip,
+      child: GestureDetector(onTap: onTap, child: btn),
     );
   }
 }
 
+/// The gradient header: app name, search and the account menu.
 class GlassHeader extends StatelessWidget {
   const GlassHeader({
     super.key,
-    required this.onMenu,
     required this.onSearch,
     required this.onProfile,
     required this.roleLabel,
   });
-  final VoidCallback onMenu, onSearch;
+  final VoidCallback onSearch;
   final ValueChanged<String> onProfile;
   final String roleLabel;
 
@@ -669,7 +669,7 @@ class GlassHeader extends StatelessWidget {
       child: CustomPaint(
         foregroundPainter: _EdgePainter(),
         child: Container(
-          padding: EdgeInsets.fromLTRB(16, top + 10, 16, 40),
+          padding: EdgeInsets.fromLTRB(20, top + 10, 16, 36),
           decoration: const BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
@@ -682,47 +682,20 @@ class GlassHeader extends StatelessWidget {
             ),
           ),
           child: Row(children: [
-            Semantics(
-              button: true,
-              label: 'Open menu',
-              child: GestureDetector(
-                onTap: onMenu,
-                behavior: HitTestBehavior.opaque,
-                child: SizedBox(
-                  width: 44,
-                  height: 44,
-                  child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        for (final w in [24.0, 18.0, 24.0]) ...[
-                          Container(
-                              width: w,
-                              height: 3,
-                              decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(3))),
-                          const SizedBox(height: 4.5),
-                        ],
-                      ]),
-                ),
-              ),
-            ),
+            const Icon(Icons.shield_outlined, color: Colors.white, size: 26),
+            const SizedBox(width: 8),
             const Expanded(
-              child: Center(
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.shield_outlined, color: Colors.white, size: 28),
-                  SizedBox(width: 8),
-                  Text('PortalAI',
-                      style: TextStyle(
-                          color: Color(0xFFF8F8FF),
-                          fontSize: 26,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -.3)),
-                ]),
-              ),
+              child: Text('PortalAI',
+                  style: TextStyle(
+                      color: Color(0xFFF8F8FF),
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -.3)),
             ),
-            _CircleBtn(icon: Icons.search_rounded, onTap: onSearch),
+            _CircleBtn(
+                icon: Icons.search_rounded,
+                tooltip: 'Search events',
+                onTap: onSearch),
             const SizedBox(width: 8),
             PopupMenuButton<String>(
               tooltip: 'Account',
@@ -737,10 +710,11 @@ class GlassHeader extends StatelessWidget {
                         style: const TextStyle(
                             color: AppColors.secondary,
                             fontWeight: FontWeight.w600))),
-                const PopupMenuItem(value: 'settings', child: Text('Settings')),
+                const PopupMenuItem(value: 'family', child: Text('Family links')),
+                const PopupMenuItem(value: 'help', child: Text('Help & About')),
                 const PopupMenuItem(
                     value: 'logout',
-                    child: Text('Logout',
+                    child: Text('Log out',
                         style: TextStyle(color: AppColors.high))),
               ],
               child: const _CircleBtn(icon: Icons.person_outline_rounded),
@@ -752,96 +726,71 @@ class GlassHeader extends StatelessWidget {
   }
 }
 
-class PortalNavigationDrawer extends ConsumerWidget {
-  const PortalNavigationDrawer({super.key});
+/// The four main screens, always one tap away.
+const kMainTabs = [
+  (Icons.home_outlined, Icons.home_rounded, 'Home', '/dashboard'),
+  (Icons.photo_library_outlined, Icons.photo_library_rounded, 'Pictures', '/gallery'),
+  (Icons.notifications_none_rounded, Icons.notifications_rounded, 'Messages', '/messages'),
+  (Icons.settings_outlined, Icons.settings_rounded, 'Settings', '/settings'),
+];
+
+class GlassBottomBar extends StatelessWidget {
+  const GlassBottomBar({super.key, required this.selected});
+  final int selected;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    const items = [
-      (Icons.photo_library_outlined, 'Event Gallery', '/gallery'),
-      (Icons.chat_bubble_outline_rounded, 'Message History', '/messages'),
-      (Icons.help_outline_rounded, 'Help & About', '/help'),
-      (Icons.settings_outlined, 'Settings', '/settings'),
-    ];
-    return Drawer(
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      width: MediaQuery.of(context).size.width.clamp(0, 340) * 1.0,
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.of(context).padding.bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 0, 16, bottom + 12),
       child: ClipRRect(
-        borderRadius: const BorderRadius.horizontal(right: Radius.circular(36)),
+        borderRadius: BorderRadius.circular(30),
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
           child: Container(
-            color: const Color(0xE8F4F7FF),
-            child: SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(children: [
-                  Row(children: [
-                    const GlassIconBadge(icon: Icons.shield_outlined, size: 46),
-                    const SizedBox(width: 12),
-                    const Expanded(
-                      child: Text('PortalAI',
-                          style: TextStyle(
-                              fontSize: 26, fontWeight: FontWeight.w700)),
-                    ),
-                    IconButton.filled(
-                      tooltip: 'Close menu',
-                      style: IconButton.styleFrom(
-                          backgroundColor: Colors.white.withValues(alpha: .8),
-                          foregroundColor: AppColors.secondary),
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ]),
-                  const SizedBox(height: 24),
-                  for (final it in items) ...[
-                    GlassCard(
-                      radius: 24,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 12),
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        context.go(it.$3);
-                      },
-                      child: Row(children: [
-                        GlassIconBadge(icon: it.$1, size: 44),
-                        const SizedBox(width: 14),
-                        Expanded(
-                            child: Text(it.$2,
-                                style: const TextStyle(
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.w600))),
-                        const Icon(Icons.chevron_right_rounded,
-                            color: AppColors.secondary),
-                      ]),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  const Spacer(),
-                  GlassCard(
-                    radius: 28,
-                    fill: const Color(0x99F3BBD0),
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      ref.read(authProvider.notifier).logout();
-                    },
-                    child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.logout_rounded, color: AppColors.high),
-                          SizedBox(width: 10),
-                          Text('Logout',
-                              style: TextStyle(
-                                  color: AppColors.high,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 17)),
-                        ]),
-                  ),
-                ]),
-              ),
+            height: 66,
+            decoration: BoxDecoration(
+              color: const Color(0xD9F8F9FF),
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(color: Colors.white, width: 1.5),
             ),
+            child: Row(children: [
+              for (var i = 0; i < kMainTabs.length; i++)
+                Expanded(
+                  child: Semantics(
+                    button: true,
+                    selected: i == selected,
+                    label: kMainTabs[i].$3,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(30),
+                      onTap: i == selected
+                          ? null
+                          : () => context.go(kMainTabs[i].$4),
+                      child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                                i == selected
+                                    ? kMainTabs[i].$2
+                                    : kMainTabs[i].$1,
+                                color: i == selected
+                                    ? AppColors.iconBlue
+                                    : AppColors.muted),
+                            const SizedBox(height: 3),
+                            Text(kMainTabs[i].$3,
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: i == selected
+                                        ? FontWeight.w700
+                                        : FontWeight.w500,
+                                    color: i == selected
+                                        ? AppColors.iconBlue
+                                        : AppColors.muted)),
+                          ]),
+                    ),
+                  ),
+                ),
+            ]),
           ),
         ),
       ),
@@ -849,40 +798,187 @@ class PortalNavigationDrawer extends ConsumerWidget {
   }
 }
 
+/// Every signed-in screen: header on top, the page, and on the four main
+/// screens ([tab] 0-3) the bottom bar. Inner pages (tab null) have a back
+/// button in their [PageHeading] instead.
 class PortalAppShell extends ConsumerWidget {
-  const PortalAppShell({
-    super.key,
-    required this.child,
-    this.floatingActionButton,
-  });
+  const PortalAppShell(
+      {super.key, required this.child, this.tab, this.floatingActionButton});
   final Widget child;
+  final int? tab;
   final Widget? floatingActionButton;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final role = ref.watch(authProvider);
     return Scaffold(
-      drawer: const PortalNavigationDrawer(),
       resizeToAvoidBottomInset: true,
+      extendBody: true,
       floatingActionButton: floatingActionButton,
+      bottomNavigationBar: tab == null ? null : GlassBottomBar(selected: tab!),
       body: AmbientBackground(
         child: Column(children: [
           Builder(
             builder: (ctx) => GlassHeader(
-              roleLabel: role == UserRole.guardian ? 'Guardian' : 'Resident',
-              onMenu: () => Scaffold.of(ctx).openDrawer(),
+              roleLabel: role == UserRole.guardian
+                  ? 'Signed in as guardian'
+                  : 'Signed in as resident',
               onSearch: () => showGlobalSearch(ctx, ref),
               onProfile: (v) {
-                if (v == 'settings') ctx.go('/settings');
+                if (v == 'family') ctx.push('/settings/family');
+                if (v == 'help') ctx.push('/help');
                 if (v == 'logout') ref.read(authProvider.notifier).logout();
               },
             ),
           ),
-          Expanded(child: SafeArea(top: false, child: child)),
+          Expanded(
+              child: SafeArea(
+                  top: false, bottom: tab == null, child: child)),
         ]),
       ),
     );
   }
+}
+
+/// A small grey heading above a group of cards.
+class SectionLabel extends StatelessWidget {
+  const SectionLabel(this.text, {super.key, this.action, this.onAction});
+  final String text;
+  final String? action;
+  final VoidCallback? onAction;
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(left: 6, bottom: 2),
+        child: Row(children: [
+          Expanded(
+            child: Text(text,
+                style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.secondary,
+                    letterSpacing: .2)),
+          ),
+          if (action != null)
+            TextButton(onPressed: onAction, child: Text(action!)),
+        ]),
+      );
+}
+
+/// One tappable line inside a [GlassCard] list.
+class GlassListRow extends StatelessWidget {
+  const GlassListRow({
+    super.key,
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    this.onTap,
+    this.iconColor = AppColors.iconBlue,
+  });
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+  final Color iconColor;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
+          child: Row(children: [
+            Icon(icon, color: iconColor),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w600)),
+                    if (subtitle != null)
+                      Text(subtitle!,
+                          style: const TextStyle(
+                              fontSize: 13.5,
+                              color: AppColors.secondary,
+                              height: 1.3)),
+                  ]),
+            ),
+            if (trailing != null)
+              trailing!
+            else if (onTap != null)
+              const Icon(Icons.chevron_right_rounded,
+                  color: AppColors.secondary),
+          ]),
+        ),
+      );
+}
+
+/// Thin divider between [GlassListRow]s.
+class GlassDivider extends StatelessWidget {
+  const GlassDivider({super.key});
+  @override
+  Widget build(BuildContext context) =>
+      Divider(height: 1, color: AppColors.muted.withValues(alpha: .25));
+}
+
+/// "2:14 PM" today, "Yesterday 2:14 PM", or the date.
+String fmtWhen(DateTime d) {
+  final now = DateTime.now();
+  final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
+  final t =
+      '$h:${d.minute.toString().padLeft(2, '0')} ${d.hour >= 12 ? 'PM' : 'AM'}';
+  final day = DateTime(d.year, d.month, d.day);
+  final today = DateTime(now.year, now.month, now.day);
+  if (day == today) return t;
+  if (day == today.subtract(const Duration(days: 1))) return 'Yesterday $t';
+  return '${fmtDate(d)} · $t';
+}
+
+/// One event as a compact line: photo or icon, what happened, when, score.
+class EventRow extends StatelessWidget {
+  const EventRow({super.key, required this.e, this.onTap});
+  final SecurityEvent e;
+  final VoidCallback? onTap;
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: onTap ?? () => context.push('/events/${e.id}'),
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          child: Row(children: [
+            SnapshotThumb(
+                location: e.location,
+                size: 48,
+                tint: riskStyle(e.score).bg,
+                imageUrl: e.hasLivePhoto ? e.snapshotUrl : null),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                        e.description.isEmpty
+                            ? e.type
+                            : '${e.type} · ${e.description}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w600)),
+                    Text('${fmtWhen(e.timestamp)} · ${e.location}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 13, color: AppColors.secondary)),
+                  ]),
+            ),
+            const SizedBox(width: 8),
+            RiskScoreBadge(score: e.score),
+          ]),
+        ),
+      );
 }
 
 // ───────────────────────── Shared page pieces ─────────────────────────
@@ -957,10 +1053,10 @@ class PageBody extends StatelessWidget {
   final List<Widget> children;
   @override
   Widget build(BuildContext context) => ListView(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 28),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
         children: [
           for (var i = 0; i < children.length; i++) ...[
-            if (i > 0) const SizedBox(height: 20),
+            if (i > 0) const SizedBox(height: 16),
             children[i],
           ],
         ],
@@ -1017,11 +1113,8 @@ void showGlobalSearch(BuildContext context, WidgetRef ref) {
                         style: TextStyle(color: AppColors.secondary)))
                 : ListView(shrinkWrap: true, children: [
                     for (final e in hits)
-                      ListTile(
-                        leading: SnapshotThumb(location: e.location, size: 44),
-                        title: Text('${e.location} · ${e.type}'),
-                        subtitle: Text(fmtStamp(e.timestamp)),
-                        trailing: RiskScoreBadge(score: e.score),
+                      EventRow(
+                        e: e,
                         onTap: () {
                           Navigator.of(ctx).pop();
                           context.push('/events/${e.id}');

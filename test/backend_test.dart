@@ -42,11 +42,6 @@ void main() {
 
       final messages = await service.fetchMessages();
       expect(messages, isNotEmpty);
-
-      // Stats calculation
-      final stats = service.calculateStats(events);
-      expect(stats.length, equals(3));
-      expect(stats[0].label, equals('Total Events'));
     });
   });
 
@@ -54,8 +49,46 @@ void main() {
     test('Push is off without Firebase and topic calls are harmless', () async {
       final fb = FirebaseService.instance;
       expect(fb.isAvailable, isFalse);
-      await fb.applyRoleTopics(UserRole.guardian);
-      await fb.applyRoleTopics(null);
+      await fb.syncTopics({'portal_x_guardian'}, role: UserRole.guardian);
+      await fb.syncTopics(const {});
+    });
+
+    test('Topics belong to one household only', () {
+      expect(
+          FirebaseService.topicsFor(
+              role: UserRole.resident, userId: 'r1', status: true, digest: false),
+          {'portal_r1_resident', 'portal_r1_status'});
+      expect(
+          FirebaseService.topicsFor(
+              role: UserRole.guardian,
+              userId: 'g1',
+              linkedResidentIds: ['r1', 'r2'],
+              status: false,
+              digest: false),
+          {'portal_r1_guardian', 'portal_r2_guardian'});
+      // A guardian with no linked resident gets no pushes at all
+      expect(
+          FirebaseService.topicsFor(role: UserRole.guardian, userId: 'g1'),
+          isEmpty);
+      expect(FirebaseService.topicsFor(role: null, userId: 'r1'), isEmpty);
+    });
+  });
+
+  group('Readable push text', () {
+    test('Unfilled n8n expressions and raw JSON are cleaned', () {
+      expect(cleanPushText(' {{ \$("Decide").first().json.push_title }}'), '');
+      expect(cleanPushText('{"body":"Someone at the door"}'),
+          'Someone at the door');
+      expect(cleanPushText('🚨 Amma\'s home · 2:14 AM'), '🚨 Amma\'s home · 2:14 AM');
+      final m = SupabaseService.mapMessage({
+        'id': 1,
+        'category': 'alert',
+        'title': ' {{ \$("Decide").first().json.push_title }}',
+        'body': ' {{ \$("Decide").first().json.push_body }}',
+        'created_at': '2026-10-21T10:00:00+05:30',
+      }, const {});
+      expect(m.title, 'Unusual activity');
+      expect(m.description, isNot(contains('{{')));
     });
   });
 
@@ -117,8 +150,6 @@ void main() {
       final messages = container.read(messagesProvider);
       expect(messages, isNotEmpty);
 
-      final stats = container.read(statsProvider);
-      expect(stats.length, equals(3));
     });
   });
 }

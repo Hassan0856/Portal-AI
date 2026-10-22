@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart' show AuthChangeEvent, Au
 import '../data/mock_data.dart';
 import '../models/models.dart';
 import '../services/firebase_service.dart';
+import '../services/link_service.dart';
 import '../services/supabase_service.dart';
 
 /// Current signed-in role, or null when signed out.
@@ -50,12 +51,8 @@ class AuthNotifier extends Notifier<UserRole?> {
     }
   }
 
-  void _signedIn(UserRole role) {
-    state = role;
-    final s = ref.read(settingsProvider);
-    unawaited(FirebaseService.instance.applyRoleTopics(role,
-        status: s.systemUpdates, digest: s.activityAlerts));
-  }
+  // Push topics follow the role and links by themselves (pushTopicsProvider).
+  void _signedIn(UserRole role) => state = role;
 
   /// Signs in with email + password and checks profiles.role (9.2).
   Future<String?> signIn(UserRole role, String email, String password) async {
@@ -68,7 +65,7 @@ class AuthNotifier extends Notifier<UserRole?> {
   /// A signed-out phone receives no alerts.
   Future<void> logout() async {
     state = null;
-    await FirebaseService.instance.applyRoleTopics(null);
+    await FirebaseService.instance.syncTopics(const {});
     await SupabaseService.instance.signOut();
   }
 
@@ -90,10 +87,10 @@ class AuthNotifier extends Notifier<UserRole?> {
       SupabaseService.instance.resendConfirmation(email);
 }
 
-/// Settings -> Notifications. Each switch is an optional FCM topic,
-/// remembered on the phone (Build Guide 9.4):
-///   systemUpdates  -> portal_status (sensor offline alerts)
-///   activityAlerts -> portal_digest (daily digest of routine activity)
+/// Settings -> Notifications. Each switch is an optional FCM topic of the
+/// household, remembered on the phone (Build Guide 9.4):
+///   systemUpdates  -> portal_<resident>_status (sensor offline alerts)
+///   activityAlerts -> portal_<resident>_digest (daily digest)
 /// Door alerts and the guardian SOS alarm are always on.
 final settingsProvider =
     NotifierProvider<SettingsNotifier, AppSettings>(SettingsNotifier.new);
@@ -117,18 +114,12 @@ class SettingsNotifier extends Notifier<AppSettings> {
     state = state.copyWith(systemUpdates: v);
     final p = await SharedPreferences.getInstance();
     await p.setBool('systemUpdates', v);
-    if (ref.read(authProvider) != null) {
-      await FirebaseService.instance.setTopic(kTopicStatus, v);
-    }
   }
 
   Future<void> setActivityAlerts(bool v) async {
     state = state.copyWith(activityAlerts: v);
     final p = await SharedPreferences.getInstance();
     await p.setBool('activityAlerts', v);
-    if (ref.read(authProvider) != null) {
-      await FirebaseService.instance.setTopic(kTopicDigest, v);
-    }
   }
 }
 
@@ -191,30 +182,46 @@ final messagesProvider = Provider<List<AppMessage>>((ref) {
   ].where((m) => m.timestamp.isAfter(cutoff)).toList();
 });
 
-/// Routine heatmap: the learned baseline (WF-05), or the events themselves
-/// until a baseline exists.
-final _baselineHeatmapProvider = FutureProvider<List<List<int>>?>((ref) {
-  ref.watch(authProvider);
-  return SupabaseService.instance.fetchBaselineHeatmap();
-});
-
-final heatmapProvider = Provider<List<List<int>>>((ref) {
-  if (!SupabaseService.instance.isAvailable) return mockHeatmap;
-  final baseline = ref.watch(_baselineHeatmapProvider).valueOrNull;
-  return baseline ??
-      SupabaseService.heatmapFromEvents(ref.watch(eventsProvider));
-});
-
-/// Stats derived from the events: last 7 days against the week before.
-final statsProvider = Provider<List<StatItem>>((ref) {
-  final events = ref.watch(eventsProvider);
-  return SupabaseService.instance.calculateStats(events);
-});
-
 /// Setup gate: false until a reference photo with the role "resident"
 /// exists (null = unknown, nothing is gated).
 final residentFaceProvider = FutureProvider<bool?>((ref) {
   final role = ref.watch(authProvider);
-  if (role == null) return Future.value(null);
+  // Only the resident is sent to add their photo; a guardian is never gated.
+  if (role != UserRole.resident) return Future.value(null);
   return SupabaseService.instance.hasResidentFace();
+});
+
+/// The people the signed-in user is linked to (guardians see residents,
+/// residents see guardians). Refresh with ref.invalidate(linksProvider).
+final linksProvider = FutureProvider<List<LinkedPerson>>((ref) {
+  ref.watch(authProvider);
+  return LinkService.instance.myLinks();
+});
+
+/// Keeps this phone on the push topics of its own household only. Watched
+/// by the app, so it re-runs on sign-in, sign-out, a new or removed link,
+/// and the notification switches.
+final pushTopicsProvider = Provider<void>((ref) {
+  final role = ref.watch(authProvider);
+  final settings = ref.watch(settingsProvider);
+  final links = ref.watch(linksProvider);
+  if (role == null) {
+    unawaited(FirebaseService.instance.syncTopics(const {}));
+    return;
+  }
+  // Wait for the links; on an error keep whatever the phone is on now.
+  if (role == UserRole.guardian && !links.hasValue) return;
+  unawaited(FirebaseService.instance.syncTopics(
+    FirebaseService.topicsFor(
+      role: role,
+      userId: SupabaseService.instance.currentUser?.id,
+      linkedResidentIds: [
+        for (final p in links.valueOrNull ?? const <LinkedPerson>[])
+          if (p.role == UserRole.resident) p.userId,
+      ],
+      status: settings.systemUpdates,
+      digest: settings.activityAlerts,
+    ),
+    role: role,
+  ));
 });

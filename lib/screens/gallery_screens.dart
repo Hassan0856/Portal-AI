@@ -32,20 +32,19 @@ class _EventGalleryScreenState extends ConsumerState<EventGalleryScreen> {
       _ => all,
     };
     return PortalAppShell(
+      tab: 1,
       child: PageBody(children: [
-        const PageHeading(
-            title: 'Event Gallery',
-            description: 'View captured snapshots and their AI risk scores.',
-            icon: Icons.photo_library_outlined),
+        const SectionLabel('Photos from the door camera'),
         GlassFilterTabs(
-            labels: const ['All Events', 'Score ≥ 4', 'Score < 4'],
+            labels: const ['All', 'Flagged', 'Visitors'],
             selected: _tab,
             onChanged: (i) => setState(() => _tab = i)),
         if (list.isEmpty)
           const Padding(
               padding: EdgeInsets.all(24),
               child: Center(
-                  child: Text('No events in this range.',
+                  child: Text('No photos here. Photos are only kept for flagged events and daytime visitors.',
+                      textAlign: TextAlign.center,
                       style: TextStyle(color: AppColors.secondary))))
         else
           Column(children: [
@@ -242,7 +241,6 @@ class _EventDetailScreenState extends ConsumerState<EventDetailScreen> {
               ],
             ]),
           ),
-        const RetentionNotice(),
       ]),
     );
   }

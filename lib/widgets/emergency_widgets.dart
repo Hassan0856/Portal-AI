@@ -4,65 +4,7 @@ import '../core/app_colors.dart';
 import '../services/firebase_service.dart';
 import 'glass.dart';
 
-/// Guardian-only EMERGENCY bar shown under the header on the Dashboard.
-/// Tapping it opens the SOS sheet.
-class EmergencyBanner extends StatelessWidget {
-  const EmergencyBanner({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: 'Emergency. Open SOS options',
-      child: Container(
-        height: 64,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(32),
-          gradient: const LinearGradient(
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-            colors: [AppColors.critical, AppColors.coral],
-          ),
-          border: Border.all(
-              color: Colors.white.withValues(alpha: .85), width: 1.5),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.critical.withValues(alpha: .30),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(32),
-            onTap: () => showSosSheet(context),
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20),
-              child: Row(children: [
-                Icon(Icons.phone_rounded, color: Colors.white, size: 28),
-                Expanded(
-                  child: Center(
-                    child: Text('EMERGENCY',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1.2)),
-                  ),
-                ),
-                Icon(Icons.chevron_right_rounded,
-                    color: Colors.white, size: 30),
-              ]),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
+/// "Test SOS alarm" (Settings, guardians): hold SOS to hear the alarm.
 Future<void> showSosSheet(BuildContext context) =>
     showGlassSheet<void>(context, (_) => const _SosPanel());
 

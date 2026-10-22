@@ -1,9 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../core/app_colors.dart';
 import '../core/app_config.dart';
 import '../data/mock_data.dart';
 import '../models/models.dart';
@@ -475,14 +473,26 @@ class SupabaseService {
         'offline' => MessageKind.system,
         _ => MessageKind.general,
       },
-      title: (r['title'] as String?) ?? 'Notification',
+      title: _orElse(cleanPushText(r['title']), _categoryTitle(category)),
       timestamp: _time(r['created_at']) ?? DateTime.now(),
-      description: (r['body'] as String?) ?? '',
+      description: _orElse(cleanPushText(r['body']),
+          event?.description ?? 'Open the event for details.'),
       score: event?.score,
       location: event?.location,
       eventId: eventId,
     );
   }
+
+  static String _orElse(String s, String fallback) => s.isEmpty ? fallback : s;
+
+  static String _categoryTitle(String category) => switch (category) {
+        'alert_stage1' => 'Door activity',
+        'alert' => 'Unusual activity',
+        'inactivity' => 'No door activity',
+        'offline' => 'Sensor offline',
+        'digest' => 'Daily digest',
+        _ => 'Notification',
+      };
 
   // ───────────────────────── Settings data ─────────────────────────
 
@@ -536,145 +546,4 @@ class SupabaseService {
       'image_b64': base64Encode(jpegBytes),
     });
   }
-
-  // ───────────────────────── Heatmap and statistics ─────────────────────────
-
-  /// Routine heatmap from the learned baseline (WF-05): 7 days (Sun first)
-  /// by 8 three-hour slots, levels 0-3. Null when there is no baseline yet.
-  Future<List<List<int>>?> fetchBaselineHeatmap() async {
-    if (!isAvailable) return null;
-    try {
-      final rows =
-          await client.from('baseline').select('day_of_week, hour, avg_count');
-      if (rows.isEmpty) return null;
-      final sums = List.generate(7, (_) => List<double>.filled(8, 0));
-      for (final r in rows) {
-        final d = (r['day_of_week'] as num?)?.toInt();
-        final h = (r['hour'] as num?)?.toInt();
-        if (d == null || h == null || d < 0 || d > 6 || h < 0 || h > 23) {
-          continue;
-        }
-        sums[d][h ~/ 3] += (r['avg_count'] as num?)?.toDouble() ?? 0;
-      }
-      return levelsFrom(sums);
-    } catch (e) {
-      debugPrint('[SupabaseService] fetchBaselineHeatmap: $e');
-      return null;
-    }
-  }
-
-  /// Heatmap from the events themselves, used until a baseline exists.
-  static List<List<int>> heatmapFromEvents(List<SecurityEvent> events) {
-    final sums = List.generate(7, (_) => List<double>.filled(8, 0));
-    for (final e in events.where((e) => e.eventType == 'motion')) {
-      sums[e.timestamp.weekday % 7][e.timestamp.hour ~/ 3] += 1;
-    }
-    return levelsFrom(sums);
-  }
-
-  static List<List<int>> levelsFrom(List<List<double>> sums) {
-    final max = sums.expand((r) => r).fold<double>(0, (a, b) => b > a ? b : a);
-    return [
-      for (final row in sums)
-        [
-          for (final v in row)
-            max <= 0
-                ? 0
-                : v / max < .15
-                    ? 0
-                    : v / max < .4
-                        ? 1
-                        : v / max < .7
-                            ? 2
-                            : 3
-        ]
-    ];
-  }
-
-  /// Last 7 days against the 7 days before.
-  List<StatItem> calculateStats(List<SecurityEvent> events) {
-    if (events.isEmpty) return isAvailable ? _emptyStats() : mockStats;
-
-    final now = DateTime.now();
-    final weekAgo = now.subtract(const Duration(days: 7));
-    final twoWeeksAgo = now.subtract(const Duration(days: 14));
-    final thisWeek =
-        events.where((e) => e.timestamp.isAfter(weekAgo)).toList();
-    final lastWeek = events
-        .where((e) =>
-            e.timestamp.isAfter(twoWeeksAgo) && !e.timestamp.isAfter(weekAgo))
-        .toList();
-
-    double avg(List<SecurityEvent> l) =>
-        l.isEmpty ? 0 : l.map((e) => e.score).reduce((a, b) => a + b) / l.length;
-    String trend(num cur, num prev) {
-      if (prev == 0) return cur == 0 ? '→ 0%' : '↑ new';
-      final pct = ((cur - prev) / prev * 100).round();
-      return pct == 0 ? '→ 0%' : (pct > 0 ? '↑ $pct%' : '↓ ${pct.abs()}%');
-    }
-
-    final high = thisWeek.where((e) => e.score >= 7).length;
-    final highPrev = lastWeek.where((e) => e.score >= 7).length;
-    final a = avg(thisWeek), aPrev = avg(lastWeek);
-
-    return [
-      StatItem(
-        label: 'Total Events',
-        value: thisWeek.length.toString(),
-        trend: trend(thisWeek.length, lastWeek.length),
-        positive: true,
-        icon: Icons.shield_outlined,
-        badgeColor: AppColors.paleLavender,
-        iconColor: AppColors.iconBlue,
-      ),
-      StatItem(
-        label: 'High Risk Events',
-        value: high.toString(),
-        trend: trend(high, highPrev),
-        positive: high <= highPrev,
-        icon: Icons.warning_amber_rounded,
-        badgeColor: const Color(0xFFF3BBD0),
-        iconColor: AppColors.high,
-      ),
-      StatItem(
-        label: 'Avg. Risk Score',
-        value: a.toStringAsFixed(1),
-        trend: trend(a, aPrev),
-        positive: a <= aPrev,
-        icon: Icons.notifications_none_rounded,
-        badgeColor: const Color(0xFFC8D9FF),
-        iconColor: AppColors.iconBlue,
-      ),
-    ];
-  }
-
-  List<StatItem> _emptyStats() => const [
-        StatItem(
-          label: 'Total Events',
-          value: '0',
-          trend: '→ 0%',
-          positive: true,
-          icon: Icons.shield_outlined,
-          badgeColor: AppColors.paleLavender,
-          iconColor: AppColors.iconBlue,
-        ),
-        StatItem(
-          label: 'High Risk Events',
-          value: '0',
-          trend: '→ 0%',
-          positive: true,
-          icon: Icons.warning_amber_rounded,
-          badgeColor: Color(0xFFF3BBD0),
-          iconColor: AppColors.high,
-        ),
-        StatItem(
-          label: 'Avg. Risk Score',
-          value: '0.0',
-          trend: '→ 0%',
-          positive: true,
-          icon: Icons.notifications_none_rounded,
-          badgeColor: Color(0xFFC8D9FF),
-          iconColor: AppColors.iconBlue,
-        ),
-      ];
 }
